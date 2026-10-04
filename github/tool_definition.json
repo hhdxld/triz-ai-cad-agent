@@ -1,0 +1,22 @@
+[
+  {
+    "type": "function",
+    "name": "generate_sensor_bracket",
+    "description": "生成 Aluminum 6061 平面双探头安装支架并导出 STEP。孔中心沿 X 向对称布置，底面 Z=0，所有尺寸为 mm。返回体积、估算重量、TRIZ 日志和结构化错误。仅进行几何与参数检查，不验证强度。",
+    "strict": true,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "length": {"type": "number", "description": "支架总长度（mm），必须容纳两孔及边距，最大1000。"},
+        "width": {"type": "number", "description": "支架总宽度（mm），必须容纳孔径及侧边距，最大1000。"},
+        "thickness": {"type": "number", "description": "基础厚度（mm），范围0.5～100。"},
+        "probe_distance": {"type": "number", "description": "两个探头孔中心间距（mm）。两孔不得相交，开启减重时必须保留槽与孔之间的连接区域。"},
+        "probe_dia": {"type": "number", "description": "探头通孔直径（mm）。用户未指定时填写推荐值16.5，并告知用户。"},
+        "enable_triz_lightening": {"type": "boolean", "description": "是否启用第2号抽取原理，在两孔中间开圆头减重通槽。用户未指定时填写true。"},
+        "enable_stress_relief": {"type": "boolean", "description": "是否添加上下表面边缘倒角。默认true。以第3号局部质量作设计解释，不属于第15号动态化；不证明应力已经降低。"}
+      },
+      "required": ["length", "width", "thickness", "probe_distance", "probe_dia", "enable_triz_lightening", "enable_stress_relief"],
+      "additionalProperties": false
+    }
+  }
+]

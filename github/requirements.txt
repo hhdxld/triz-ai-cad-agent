@@ -1,0 +1,4 @@
+cadquery==2.7.0
+streamlit==1.65.0
+streamlit-stl==0.0.6
+openai==2.54.0
