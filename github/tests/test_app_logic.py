@@ -55,6 +55,14 @@ class AppLogicTests(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertNotIn("test-only", result["error_message"])
 
+    def test_unsupported_shape_must_not_be_replaced_with_sensor_plate(self):
+        for text in ('做一个圆柱，直径20长度100', '做一个L形支架，长100宽45厚5',
+                     '做一个无孔的长100宽45厚5板', '做齿轮，直径50厚5', '长100宽45厚5的外壳'):
+            with self.subTest(text=text), patch('app.cad_tool.generate_sensor_bracket') as generate:
+                result = process_request(text, None, mode='本地参数识别')
+                self.assertEqual(result['status'], 'error')
+                generate.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

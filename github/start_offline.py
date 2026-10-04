@@ -16,11 +16,11 @@ ROOT = Path(__file__).resolve().parent
 URL = "http://127.0.0.1:8501"
 
 
-def is_running() -> bool:
+def is_running(url: str = URL) -> bool:
     """只检查本机健康接口，不连接互联网；禁用代理避免绕过本地地址。"""
     try:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(URL + "/_stcore/health", timeout=1) as response:
+        with opener.open(url + "/_stcore/health", timeout=1) as response:
             return response.status == 200 and response.read().decode().strip() == "ok"
     except (OSError, ValueError):
         return False
@@ -30,26 +30,32 @@ def main() -> int:
     """必要时启动后台服务，确认可用后打开本机链接。"""
     parser = argparse.ArgumentParser(description="TRIZ AI CAD 离线网站启动器")
     parser.add_argument("--no-browser", action="store_true", help="只启动服务，不打开浏览器")
+    entrances = parser.add_mutually_exclusive_group()
+    entrances.add_argument("--public", action="store_true", help="启动免登录公开体验入口，端口8502")
+    entrances.add_argument("--hosted", action="store_true", help="启动需登录的云端网站本机预览，端口8503")
     args = parser.parse_args()
+    port = "8502" if args.public else "8503" if args.hosted else "8501"
+    site_url = f"http://127.0.0.1:{port}"
+    entry = "public_app.py" if args.public else "hosted_app.py" if args.hosted else "app.py"
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    if not is_running():
+    if not is_running(site_url):
         python = ROOT / ".venv" / "Scripts" / "python.exe"
         if not python.is_file():
             print("未找到项目Python环境。请按README安装依赖后重试。")
             return 1
-        log = ROOT / "outputs" / "offline_server.log"
+        log = ROOT / "outputs" / ("public_server.log" if args.public else "hosted_server.log" if args.hosted else "offline_server.log")
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("ab") as output:
             service = subprocess.Popen(
-                [str(python), "-m", "streamlit", "run", str(ROOT / "app.py"),
-                 "--server.address", "127.0.0.1", "--server.port", "8501",
+                [str(python), "-m", "streamlit", "run", str(ROOT / entry),
+                 "--server.address", "127.0.0.1", "--server.port", port,
                  "--server.headless", "true", "--browser.gatherUsageStats", "false"],
                 cwd=ROOT, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
         for _ in range(30):
-            if is_running():
+            if is_running(site_url):
                 break
             if service.poll() is not None:
                 print(f"网站启动失败，请查看日志：{log}")
@@ -58,9 +64,9 @@ def main() -> int:
         else:
             print(f"网站尚未就绪，请查看日志：{log}")
             return 1
-    print(f"离线网站已就绪：{URL}")
+    print(f"网站已就绪：{site_url}")
     if not args.no_browser:
-        webbrowser.open(URL)
+        webbrowser.open(site_url)
     return 0
 
 

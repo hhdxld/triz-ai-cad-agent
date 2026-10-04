@@ -13,10 +13,8 @@ from pathlib import Path
 import re
 from typing import Any
 
-import streamlit as st
-from streamlit_stl import stl_from_file
-
 import cad_tool
+from box_tool import BOX_DEFAULTS, generate_box_with_lid
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_PARAMS = {
@@ -25,10 +23,36 @@ DEFAULT_PARAMS = {
     "enable_triz_lightening": True, "enable_stress_relief": True,
 }
 LABELS = {
+    "height": "高度", "lid_clearance": "盖子每侧配合间隙",
     "length": "长度", "width": "宽度", "thickness": "厚度",
     "probe_distance": "探头孔距", "probe_dia": "探头孔径",
     "enable_triz_lightening": "减重槽", "enable_stress_relief": "边缘倒角",
 }
+
+
+def parse_box_request(text: str, previous: dict | None = None) -> dict:
+    """盒体核心尺寸缺失时要求补充；不擅自添加探头孔或替换零件类型。"""
+    if re.search(r'圆柱|齿轮|圆形|球体|螺纹|卡扣|铰链|开孔|钻孔|孔径|孔距|分隔|圆角|倒角',text):
+        raise ValueError('盒子需求包含当前工具未实现的结构，已停止建模，不能用基础带盖盒子冒充完成。')
+    params = {k: v for k,v in (previous or {}).items() if k in BOX_DEFAULTS}
+    number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
+    for key,aliases in {'length':'长度|长|length','width':'宽度|宽|width','height':'高度|高|height',
+                        'thickness':'壁厚|厚度|厚|thickness','lid_clearance':'每侧配合间隙|配合间隙|lid_clearance'}.items():
+        matches = list(re.finditer(rf'(?:{aliases})\s*(?:改为|修改为|改成|设为|为|是)?\s*[:：=]?\s*({number})\s*(mm|cm|毫米|厘米)?',text,re.I))
+        if matches:
+            match=matches[-1]
+            params[key]=float(match[1])*(10 if (match[2] or '').lower() in ('cm','厘米') else 1)
+    missing = {'length','width','height','thickness'}-set(params)
+    if missing:
+        raise ValueError('带盖盒子还缺少：'+ '、'.join(LABELS[k] for k in sorted(missing))+'。请补充实际尺寸。')
+    params.setdefault('lid_clearance',.3)
+    return params
+
+
+def is_box_request(text: str, previous: dict | None) -> bool:
+    """选择独立盒体工具；明确支架请求可以切回原工具。"""
+    return bool(re.search(r'盒|箱|有盖|带盖|盖子',text)) or (
+        bool(previous and 'height' in previous) and not re.search(r'支架|探头|安装板',text))
 
 
 def parse_local_request(text: str, previous: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -37,7 +61,9 @@ def parse_local_request(text: str, previous: dict[str, Any] | None = None) -> di
     支持“长100宽45厚5孔距50”、100×45×5 mm、cm 与中文毫米/厘米。
     本地规则不猜测复杂语义，无法识别时要求用户补充，不制造 AI 成功假象。
     """
-    params = dict(previous or DEFAULT_PARAMS)
+    if re.search(r'长方体|圆柱|齿轮|法兰|外壳|壳体|无孔|不要孔|不打孔|单孔|[三四五六]孔|[34]个?孔|[LU][形型]|L-shaped|螺纹|折弯|台阶|圆管|球体|侧面.*孔', text, re.I):
+        raise ValueError('该需求不能用双探头平面安装板实现，已停止建模，避免生成不符合描述的零件。')
+    params = dict(previous if previous and 'height' not in previous else DEFAULT_PARAMS)
     updates: dict[str, Any] = {}
     number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
     unit = r"(?:毫米|厘米|mm|cm)"
@@ -100,11 +126,13 @@ def extract_api_parameters(text: str, previous: dict[str, Any] | None, *,
         "未指定时推荐参数": DEFAULT_PARAMS,
     }
     instructions = (
-        "你是双探头平面安装板设计助手。只支持指定工具的七个参数。所有尺寸换算为mm。"
+        "你是机械设计助手，支持双探头平面安装板和带盖空心长方体盒子两个工具。所有尺寸换算为mm。"
+        "用户要求盒子、箱体或带盖长方体时只能调用generate_box_with_lid，不能套用双孔安装板。"
+        "盒子长宽高为闭合装配外尺寸，总高度含盖板，壁底盖厚度一致，缺少核心尺寸先询问，不调用工具。"
         "修改请求必须保留上一成功模型中未被用户修改的参数。首个模型缺失的参数使用推荐参数。"
         "不得擅自修改用户明确给定的值来绕过几何错误。禁止生成或执行Python代码。"
-        "只有用户要求创建或修改受支持零件时才调用generate_sensor_bracket，且每次只调用一次。"
-        "如果请求超出平面安装板能力、含不支持的结构，或无法明确用户意图，直接说明并询问，不能伪装完成。"
+        "只有用户要求创建或修改受支持零件时才选择对应工具，且每次只调用一次。"
+        "如果请求超出这两种工具能力、含不支持的结构，或无法明确用户意图，直接说明并询问，不能伪装完成。"
         "第2号是抽取，第3号是局部质量，第15号是动态化。倒角不代表强度已验证。"
         + json.dumps(context, ensure_ascii=False, allow_nan=False)
     )
@@ -123,6 +151,10 @@ def extract_api_parameters(text: str, previous: dict[str, Any] | None, *,
                 tools = [{"type": "function", "function": {
                     key: value for key, value in item.items() if key != "type"
                 }} for item in definitions]
+                # 部分兼容厂商不支持 OpenAI strict 开关；仍由服务端白名单验证结果。
+                if 'api.openai.com' not in base_url:
+                    for tool in tools:
+                        tool['function'].pop('strict',None)
                 response = client.chat.completions.create(
                     model=model, messages=[{"role": "system", "content": instructions},
                                            {"role": "user", "content": text}],
@@ -141,10 +173,10 @@ def extract_api_parameters(text: str, previous: dict[str, Any] | None, *,
         raise RuntimeError("API 连接失败或超时，请检查网络和接口地址。") from None
     except APIStatusError as exc:
         raise RuntimeError(f"API 返回 HTTP {exc.status_code}，请检查模型名称、协议和服务状态。") from None
-    if name != "generate_sensor_bracket":
+    if name not in ("generate_sensor_bracket", "generate_box_with_lid"):
         raise ValueError("模型返回了不支持的工具。")
     params = json.loads(arguments)
-    if not isinstance(params, dict) or set(params) != set(DEFAULT_PARAMS):
+    if not isinstance(params, dict) or set(params) != set(BOX_DEFAULTS if name == 'generate_box_with_lid' else DEFAULT_PARAMS):
         raise ValueError("模型参数不完整或存在额外字段，请重试。")
     return params
 
@@ -156,18 +188,19 @@ def process_request(text: str, previous: dict[str, Any] | None, *,
     try:
         if mode == "在线模型 API":
             if not api_key.strip() or not base_url.strip() or not model.strip():
-                raise ValueError("请先在左侧填写 API 地址、模型名称和密钥，或切换到本地参数识别体验。")
+                raise ValueError("站长尚未配置模型 API，当前没有调用 AI。请先配置服务端 API，或使用明确标注能力范围的本地参数工具。")
             params = extract_api_parameters(text, previous, api_key=api_key,
                                             base_url=base_url, model=model, protocol=protocol)
         else:
-            params = parse_local_request(text, previous)
+            params = parse_box_request(text, previous) if is_box_request(text, previous) else parse_local_request(text, previous)
         # 在线输出也通过严格白名单，禁止把模型额外字段当作Python参数执行。
-        if set(params) != set(DEFAULT_PARAMS):
+        if set(params) not in (set(DEFAULT_PARAMS),set(BOX_DEFAULTS)):
             raise ValueError("参数字段与当前建模能力不一致。")
-        result = cad_tool.generate_sensor_bracket(**params)
+        result = generate_box_with_lid(**params) if 'height' in params else cad_tool.generate_sensor_bracket(**params)
         if result["status"] == "success":
             result["input_parameters"] = params
-            result["reduction_percent"] = result["physical_properties"]["weight_reduction_percent"]
+            if 'height' not in params:
+                result["reduction_percent"] = result["physical_properties"]["weight_reduction_percent"]
         return result
     except (ValueError, RuntimeError) as exc:
         return {"status": "error", "error_message": str(exc)[:1200]}
@@ -180,6 +213,11 @@ def format_report(result: dict[str, Any]) -> str:
     """用 CAD 计算结果编写报告，避免让模型编造体积、重量或减重数据。"""
     physical = result["physical_properties"]
     params = result["input_parameters"]
+    if result.get('model_type') == 'box_with_lid':
+        return '\n\n'.join(['已生成带盖空心盒：独立盒体和盖子，共两个零件。',
+            f"装配外尺寸：**{params['length']:g} × {params['width']:g} × {params['height']:g} mm**；壁、底、盖厚 **{params['thickness']:g} mm**。",
+            f"体积 {physical['volume_mm3']:,.2f} mm³，6061 铝估算重量 {physical['weight_g']:.2f} g。",
+            *result['design_notes'], '本地工具按明确尺寸生成；只有配置并选择模型 API 后才会调用 AI。'])
     lines = [
         "模型已生成，可以在右侧旋转查看或下载。",
         "",
@@ -203,129 +241,9 @@ def format_report(result: dict[str, Any]) -> str:
 
 
 def main() -> None:
-    """构建宽屏双栏界面；用 session_state 保留对话和上一成功模型。"""
-    # 页面配置是首个界面调用；导入app模块不会启动界面，便于独立测试函数。
-    st.set_page_config(page_title="TRIZ AI CAD Agent", page_icon="⚙️", layout="wide")
-    st.title("TRIZ AI CAD Agent")
-    st.caption("离线可用 · 描述双探头安装支架，预览三维模型并下载 STEP 文件。")
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": (
-            "告诉我支架长度、宽度、厚度、探头孔距和孔径。\n\n"
-            "例如：长100、宽45、厚5、孔距50、孔径16.5毫米，开启减重。\n\n"
-            "未指定的初始参数采用推荐值：100×45×5 mm，孔距50 mm，孔径16.5 mm，减重和倒角开启。"
-        )}]
-    for key in ("last_params", "latest_result"):
-        if key not in st.session_state:
-            st.session_state[key] = None
-
-    # 环境变量让部署者能够预配置API；终端用户也能在侧栏自行填写。
-    with st.sidebar:
-        st.header("设计与显示")
-        mode = st.radio("需求理解方式", ["本地参数识别", "在线模型 API"])
-        if mode == "本地参数识别":
-            st.success("离线模式 · 无需密钥")
-            st.caption("识别明确尺寸与开关，例如“长100宽45厚5孔距50”或“长度改为140”。尺寸单位默认为毫米。")
-        else:
-            st.caption("在线模式需要网络和密钥，支持更灵活的自然语言。")
-        api_key, base_url, model, protocol = "", "", "", "Chat Completions"
-        if mode == "在线模型 API":
-            base_url = st.text_input("API 地址", value=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
-            model = st.text_input("模型名称", value=os.getenv("OPENAI_MODEL", ""), placeholder="填写服务商提供的模型名称")
-            # 公共网站不得把部署者的环境密钥发给浏览器；在线模式由访客自行填写。
-            api_key = st.text_input("API 密钥", value="", type="password")
-            protocol = st.selectbox("接口协议", ["Chat Completions", "Responses"])
-            st.caption("在线模式使用你填写的密钥和服务商额度。密钥不会写入模型文件或聊天记录。")
-        color = st.color_picker("模型颜色", "#4F8BFF")
-        auto_rotate = st.toggle("自动旋转", value=False)
-        if st.button("开始新设计", use_container_width=True):
-            # 只清除当前会话，不删除服务器上的已导出成果。
-            for key in ("messages", "last_params", "latest_result"):
-                st.session_state.pop(key, None)
-            st.rerun()
-
-    left, right = st.columns([1, 1.25], gap="large")
-    with left:
-        st.subheader("设计对话")
-        # 固定高度让长对话滚动，右侧模型保持易于查看。
-        conversation = st.container(height=570)
-        with conversation:
-            for message in st.session_state.messages:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-        prompt = st.chat_input("例如：长度改为140毫米，其他尺寸保持不变")
-        if prompt:
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with conversation:
-                with st.chat_message("user"):
-                    st.markdown(prompt)
-                with st.chat_message("assistant"):
-                    with st.spinner("正在理解需求并生成模型…"):
-                        result = process_request(
-                            prompt, st.session_state.last_params, mode=mode,
-                            api_key=api_key, base_url=base_url, model=model, protocol=protocol,
-                        )
-                    if result["status"] == "success":
-                        # 只有成功生成STEP与STL后，才更新当前模型与后续修改的参数。
-                        st.session_state.last_params = result["input_parameters"]
-                        st.session_state.latest_result = result
-                        report = format_report(result)
-                        st.markdown(report)
-                    else:
-                        report = result["error_message"] + "\n\n请调整需求后重试，右侧保留上一成功模型。"
-                        st.error(result["error_message"])
-            st.session_state.messages.append({"role": "assistant", "content": report})
-
-    with right:
-        st.subheader("三维模型")
-        latest = st.session_state.latest_result
-        if latest is None:
-            st.info("生成模型后，这里将显示可拖拽旋转的三维预览。")
-            st.caption("当前支持平面双探头支架、圆头减重通槽和边缘倒角。")
-        else:
-            step_path = Path(latest["output_file"])
-            stl_path = Path(latest["stl_file"])
-            if stl_path.is_file():
-                try:
-                    # streamlit-stl将STL交给浏览器Three.js组件，支持拖拽、缩放与旋转。
-                    # 同名UUID作为key，新模型会刷新，颜色更改时保留当前组件身份。
-                    success = stl_from_file(
-                        file_path=str(stl_path), color=color, material="material",
-                        auto_rotate=auto_rotate, opacity=1.0, height=470,
-                        cam_v_angle=55, cam_h_angle=-45,
-                        key=f"preview_{stl_path.stem}",
-                    )
-                    if success is False:
-                        st.warning("预览组件读取失败，仍可下载 STEP 文件。")
-                except Exception:
-                    st.warning("三维预览加载失败，仍可下载 STEP 文件。")
-            else:
-                st.warning("STL 预览文件已不存在，请重新生成。")
-            st.caption("鼠标拖拽旋转 · 滚轮缩放 · 右键拖拽平移")
-            physical = latest["physical_properties"]
-            a, b, c = st.columns(3)
-            a.metric("体积 / mm³", f"{physical['volume_mm3']:,.1f}")
-            b.metric("估算重量 / g", f"{physical['weight_g']:.2f}")
-            c.metric("减重率", f"{latest['reduction_percent']:.2f}%")
-            # 下载原始字节，浏览器无需访问服务器文件系统路径。
-            if step_path.is_file():
-                st.download_button(
-                    "下载 STEP 工业模型", data=step_path.read_bytes(),
-                    file_name=step_path.name, mime="application/octet-stream",
-                    type="primary", use_container_width=True,
-                )
-            else:
-                st.warning("STEP 文件已不存在，请重新生成。")
-            if stl_path.is_file():
-                st.download_button("下载 STL 预览模型", data=stl_path.read_bytes(),
-                                   file_name=stl_path.name, mime="application/octet-stream",
-                                   use_container_width=True)
-            with st.expander("查看当前尺寸与功能"):
-                st.table([
-                    {"参数": LABELS[name], "当前值": (
-                        "开启" if value is True else "关闭" if value is False else f"{value:g} mm"
-                    )} for name, value in latest["input_parameters"].items()
-                ])
+    """打开本地 CAD 工作台，复用同一参数解析与建模接口。"""
+    from workspace_ui import render_workspace
+    render_workspace(process_request, format_report, DEFAULT_PARAMS, LABELS)
 
 
 if __name__ == "__main__":

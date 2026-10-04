@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 MATERIAL = "Aluminum 6061"
 DENSITY_G_PER_MM3 = 0.0027  # 推荐估算密度：2.70 g/cm³，未计入表面处理。
-DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
+DEFAULT_OUTPUT_DIR = Path(os.getenv("AICAD_OUTPUT_DIR", str(Path(__file__).resolve().parent / "outputs")))
 
 
 def _error(message: str, code: str = "INVALID_PARAMETERS",

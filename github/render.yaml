@@ -1,0 +1,27 @@
+# 部署准备文件：创建付费云服务前，在平台界面核对费用。
+# 单实例 + 持久化磁盘，不能直接增加副本共享 SQLite。
+services:
+  - type: web
+    name: triz-ai-cad-agent
+    runtime: docker
+    plan: 1c-2g
+    numInstances: 1
+    healthCheckPath: /_stcore/health
+    autoDeployTrigger: checksPass
+    disk:
+      name: aicad-data
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: AICAD_OUTPUT_DIR
+        value: /var/data/models
+      - key: AICAD_DATABASE_PATH
+        value: /var/data/business.sqlite
+      - key: AICAD_BACKUP_DIR
+        value: /var/data/backups
+      - key: AICAD_BACKUP_INTERVAL_SECONDS
+        value: "21600"
+      - key: AICAD_BILLING_MODE
+        value: demo
+      - key: AICAD_ALLOW_DEMO_API
+        value: "false"
