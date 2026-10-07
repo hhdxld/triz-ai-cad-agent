@@ -61,7 +61,7 @@ EMPTY_PREVIEW = """
 def render_workspace(process_request: Callable, format_report: Callable,
                      defaults: dict, labels: dict, *, public: bool = False) -> None:
     """呈现对话、示例、尺寸编辑、真实三维预览与设计报告。"""
-    st.set_page_config(page_title="TRIZ AI CAD Agent", page_icon="⚙️", layout="wide")
+    st.set_page_config(page_title="Green beans AI CAD", page_icon="⚙️", layout="wide")
     st.markdown(STYLE, unsafe_allow_html=True)
     for key, value in {
         "messages": [{"role": "assistant", "content":
@@ -123,7 +123,7 @@ def render_workspace(process_request: Callable, format_report: Callable,
             st.caption("支持：双探头平面板、减重槽、倒角，以及带独立盖子的空心盒。其他零件类型会提示能力范围。")
 
     st.markdown('<p class="eyebrow">DESCRIBE · DESIGN · BUILD</p>', unsafe_allow_html=True)
-    st.title("TRIZ AI CAD Agent")
+    st.title("Green beans AI CAD")
     connection = configuration or server_api_settings()
     if not connection['api_key'] or not connection['model']:
         st.warning("AI 尚未连接：当前使用本地参数建模，支持双探头安装板、带盖空心盒；不具备任意零件理解能力。")
@@ -208,7 +208,7 @@ def render_workspace(process_request: Callable, format_report: Callable,
 
     with right:
         st.subheader("模型工作台")
-        tabs = st.tabs(["三维预览", "尺寸编辑", "TRIZ 与检查"] + (["我的项目", "服务订单"] if store else []))
+        tabs = st.tabs(["三维预览", "尺寸编辑", "Green beans与检查"] + (["我的项目", "服务订单"] if store else []))
         preview_tab, parameters_tab, triz_tab = tabs[:3]
         latest = st.session_state.latest_result
         with preview_tab:
