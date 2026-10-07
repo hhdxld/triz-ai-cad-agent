@@ -16,7 +16,7 @@ from workspace_ui import STYLE, render_workspace
 
 def main() -> None:
     """登录状态只在服务器会话保存，管理员权限在每次访问时重新查询。"""
-    st.set_page_config(page_title="TRIZ AI CAD Agent", page_icon="⚙️", layout="wide")
+    st.set_page_config(page_title="Green beans AI CAD", page_icon="⚙️", layout="wide")
     st.markdown(STYLE, unsafe_allow_html=True)
     try:
         store = get_store()
@@ -36,7 +36,7 @@ def main() -> None:
         st.session_state.last_active = now
         if not user:
             # 未登录时只呈现认证表单，不创建建模、下载或后台组件。
-            st.title("欢迎使用 TRIZ AI CAD")
+            st.title("欢迎使用 Green beans AI CAD")
             st.write("登录后描述尺寸、生成三维零件，并在个人订单中查看服务记录。")
             st.caption("目前处于演示计费阶段，尚未开放真实收款。")
             render_account(store)
